@@ -294,34 +294,45 @@ def coefficient_of_variation(sua, state_ranges=None, Fs_spikes=1250, Fs=30, t_li
 
 def encoding_patterns():
 
-    # try:
-    #     df_fullmodel = pd.read_csv('data/HMM_GLM/fullmodel_r2_qc1.csv')
-    #     df_stim = pd.read_csv('data/HMM_GLM/stim_r2_qc1.csv')
-    #     df_behavior = pd.read_csv('data/HMM_GLM/behavior_r2_qc1.csv')
-    #     df_lfp = pd.read_csv('data/HMM_GLM/lfp_r2_qc1.csv')
-    #     df_pop = pd.read_csv('data/HMM_GLM/pop_r2_qc1.csv')
-    # except FileNotFoundError:
-    df_fullmodel = model_details('full')
-    df_stim  = model_details('stim')
-    df_behavior = model_details('behavior')
-    df_lfp = model_details('lfp')
-    df_pop = model_details('pop')
+    try:
+        df_fullmodel = pd.read_csv('data/HMM_GLM/fullmodel_r2_qc1.csv')
+        df_stim = pd.read_csv('data/HMM_GLM/stim_r2_qc1.csv')
+        df_behavior = pd.read_csv('data/HMM_GLM/behavior_r2_qc1.csv')
+        df_lfp = pd.read_csv('data/HMM_GLM/lfp_r2_qc1.csv')
+        df_pop = pd.read_csv('data/HMM_GLM/pop_r2_qc1.csv')
+    except FileNotFoundError:
+        df_fullmodel = model_details('full')
+        df_stim  = model_details('stim')
+        df_behavior = model_details('behavior')
+        df_lfp = model_details('lfp')
+        df_pop = model_details('pop')
 
     # Step 1: Select the specific columns from each dataframe
-    df_stim_filtered = df_stim[['unit', 'probe', 'session', 'SH_r2', 'SI_r2', 'SL_r2', 'final_r2']]
-    df_behavior_filtered = df_behavior[['unit', 'probe', 'session', 'SH_r2', 'SI_r2', 'SL_r2', 'final_r2']]
-    df_lfp_filtered = df_lfp[['unit', 'probe', 'session', 'SH_r2', 'SI_r2', 'SL_r2', 'final_r2']]
-    df_pop_filtered = df_pop[['unit', 'probe', 'session', 'SH_r2', 'SI_r2', 'SL_r2', 'final_r2']]
+    df_stim_filtered = df_stim[['unit', 'probe', 'session_id', 'SH_r2', 'SI_r2', 'SL_r2', 'final_r2']]
+    df_behavior_filtered = df_behavior[['unit', 'probe', 'session_id', 'SH_r2', 'SI_r2', 'SL_r2', 'final_r2']]
+    df_lfp_filtered = df_lfp[['unit', 'probe', 'session_id', 'SH_r2', 'SI_r2', 'SL_r2', 'final_r2']]
+    df_pop_filtered = df_pop[['unit', 'probe', 'session_id', 'SH_r2', 'SI_r2', 'SL_r2', 'final_r2']]
 
     # Step 2: Sequentially merge each filtered dataframe with df_fullmodel
-    df_summary = pd.merge(df_fullmodel, df_stim_filtered, on=['unit', 'probe', 'session'], how='left',
+    df_summary = pd.merge(df_fullmodel, df_stim_filtered, on=['unit', 'probe', 'session_id'], how='left',
                           suffixes=('', '_stim'))
-    df_summary = pd.merge(df_summary, df_behavior_filtered, on=['unit', 'probe', 'session'], how='left',
+    df_summary = pd.merge(df_summary, df_behavior_filtered, on=['unit', 'probe', 'session_id'], how='left',
                           suffixes=('', '_behavior'))
-    df_summary = pd.merge(df_summary, df_lfp_filtered, on=['unit', 'probe', 'session'], how='left', suffixes=('', '_lfp'))
-    df_summary = pd.merge(df_summary, df_pop_filtered, on=['unit', 'probe', 'session'], how='left', suffixes=('', '_pop'))
+    df_summary = pd.merge(df_summary, df_lfp_filtered, on=['unit', 'probe', 'session_id'], how='left', suffixes=('', '_lfp'))
+    df_summary = pd.merge(df_summary, df_pop_filtered, on=['unit', 'probe', 'session_id'], how='left', suffixes=('', '_pop'))
 
-    df_summary['n_sources'] = [len(np.where(row['behavior', 'area LFPs', 'other area\npopulation activity', 'stimulus'].values > 0.1)[0]) for pos, row in df_summary.iterrows()]
+
+    try:
+        df_summary['n_sources'] = [len(
+            np.where(row[['behavior', 'same\narea LFPs', 'other area\npopulation activity', 'stimulus']].values > 0.1)[
+                0]) for pos, row in df_summary.iterrows()]
+    except:
+        df_summary = df_summary.rename(columns={'final_r2_behavior': 'behavior', 'final_r2_stim': 'stimulus',
+                                                'final_r2_lfp': 'same\narea LFPs',
+                                                'final_r2_pop': 'other area\npopulation activity'})
+        df_summary['n_sources'] = [len(
+            np.where(row[['behavior', 'same\narea LFPs', 'other area\npopulation activity', 'stimulus']].values > 0.1)[
+                0]) for pos, row in df_summary.iterrows()]
     return df_summary
 
 
@@ -351,9 +362,14 @@ def model_details(model_name):
 
         # encoding information
         try:
-            r2_state = np.load('data/HMM_predictor/' + model_name + '_model/single_neuron_model/r2_3s_nrn_' + str(session_id) + '_' + stim + '_1.npy')
-            r2_final = np.load('data/HMM_predictor/' + model_name + '_model/single_neuron_model/r2_3s_final_nrn_' + str(session_id) + '_' + stim + '_1.npy')
+            if model_name != 'stim':
+                r2_state = np.load('data/HMM_predictor/' + model_name + '_model/single_neuron_model/r2_3s_nrn_' + str(session_id) + '_' + stim + '_1.npy')
+                r2_final = np.load('data/HMM_predictor/' + model_name + '_model/single_neuron_model/r2_3s_final_nrn_' + str(session_id) + '_' + stim + '_1.npy')
+            else:
+                r2_state = np.load('data/HMM_predictor/' + model_name + '_model/single_neuron_model/r2_3s_nrn_' + str(session_id) + '_' + stim + '_stim.npy')
+                r2_final = np.load('data/HMM_predictor/' + model_name + '_model/single_neuron_model/r2_3s_final_nrn_' + str(session_id) + '_' + stim + '_stim.npy')
             r2_df = make_r2_df(r2_state, r2_final, num_units)
+            r2_df['session_id'] = session_id
         except Exception as e:
             print(e)
             continue
@@ -362,9 +378,9 @@ def model_details(model_name):
             unit_ids = unit_df.unit_id.values
             analyses_df = analysis_metrics(unit_ids)
             df_merged = pd.merge(unit_df, analyses_df, on=['unit', 'probe', 'session_id', 'unit_id'], how='left')
-            df_merged = pd.merge(df_merged, r2_df, on=['unit', 'probe'], how='left')
+            df_merged = pd.merge(df_merged, r2_df, on=['unit', 'probe', 'session_id'], how='left')
         else:
-            df_merged = pd.merge(unit_df, r2_df, on=['unit', 'probe', 'session'], how='left')
+            df_merged = pd.merge(unit_df, r2_df, on=['unit', 'probe', 'session_id'], how='left')
 
         # QC
         df_merged_qc = df_merged[(df_merged.total_rate > qc_val('rate_threshold'))
