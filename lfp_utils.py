@@ -8,7 +8,6 @@ from scipy.signal import butter, sosfiltfilt, hilbert
 import matplotlib.pyplot as plt
 import scipy.io as sio
 from scipy.ndimage.filters import gaussian_filter
-from scipy.signal import sosfiltfilt, hilbert, butter
 
 data_dir = "D:/ecephys__project_cache/"
 
