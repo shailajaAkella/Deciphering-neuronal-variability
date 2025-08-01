@@ -1,26 +1,14 @@
 import os
-import sys
 import numpy as np
 import pandas as pd
-from einops import rearrange
 import numpy.matlib
-from allensdk.brain_observatory.ecephys.ecephys_session import EcephysSession
 from allensdk.brain_observatory.ecephys.ecephys_project_cache import EcephysProjectCache
-from scipy import stats
-from sklearn.preprocessing import StandardScaler
-import pickle
 from sklearn.impute import SimpleImputer
-import mat73
 from scipy.signal import butter, sosfiltfilt, hilbert
-import warnings
-import ssm
-from ssm.util import find_permutation
 import matplotlib.pyplot as plt
-from scipy import signal
 import scipy.io as sio
-import seaborn as sns
 from scipy.ndimage.filters import gaussian_filter
-import math
+from scipy.signal import sosfiltfilt, hilbert, butter
 
 data_dir = "D:/ecephys__project_cache/"
 
@@ -44,6 +32,7 @@ def lfps(session_id, stim, type=None):
 
 
 def hilbert_transform(lfp_matrix, Fs):
+
     def butter_bandpass(lowcut, highcut, fs, order):
         nyq = 0.5 * fs
         low = lowcut / nyq
@@ -51,53 +40,29 @@ def hilbert_transform(lfp_matrix, Fs):
         sos = butter(order, [low, high], btype='band', output='sos')
         return sos
 
-    probes = ['probeC', 'probeD', 'probeF', 'probeE', 'probeB', 'probeA']
+    bands = [
+        (3, 8),    # theta
+        (10, 30),  # beta
+        (30, 50),  # gamma1
+        (50, 80),  # gamma2
+    ]
+    n_bands = len(bands)
+    T, n_ch = lfp_matrix.shape
+    lfp_hilbert = np.zeros((T, n_bands, n_ch))
 
-    lfp_bandpass = {probe: [] for probe in probes}
-    lfp_hilbert = {probe: [] for probe in probes}
+    # Precompute filters
+    sos_filters = [butter_bandpass(low, high, Fs, 11) for (low, high) in bands]
 
-    # filters
-    sos_theta = butter_bandpass(3, 8, Fs, 11)
-    sos_beta = butter_bandpass(10, 30, Fs, 11)
-    sos_gamma1 = butter_bandpass(30, 50, Fs, 11)
-    sos_gamma2 = butter_bandpass(50, 80, Fs, 11)
-    n_bands = 4
+    # Vectorized filtering and Hilbert transform per band
+    for b, sos in enumerate(sos_filters):
+        # Replace NaNs with zeros for filtering
+        data = np.nan_to_num(lfp_matrix)
+        # Apply filter to all channels at once (axis=0: time, axis=1: channels)
+        filtered = sosfiltfilt(sos, data, axis=0)
+        # Hilbert transform (analytic signal) for all channels at once
+        lfp_hilbert[:, b, :] = np.abs(hilbert(filtered, axis=0))
 
-    for probe in probes:
-        if len(lfp_matrix[probe]) == 0:
-            continue
-        [n_ch, n_tr, T] = lfp_matrix[probe].shape
-
-        lfp_hilbert[probe] = np.zeros([n_ch, n_tr, n_bands, T])
-        lfp_bandpass[probe] = np.zeros([n_ch, n_tr, n_bands, T])
-
-        for ch in range(n_ch):
-            # theta 3 - 8 Hz:
-            theta = sosfiltfilt(sos_theta, lfp_matrix[probe][ch, :, :, ])  # filtering
-            lfp_bandpass[probe][ch, :, 0, :] = theta
-            lfp_hilbert[probe][ch, :, 0, :] = np.abs(hilbert(theta))  # get envelope
-
-            # beta 10 - 30 Hz:
-            beta = sosfiltfilt(sos_beta, lfp_matrix[probe][ch, :, :, ])
-            lfp_bandpass[probe][ch, :, 1, :] = beta
-            lfp_hilbert[probe][ch, :, 1, :] = np.abs(hilbert(beta))
-
-            # lower gamma 30 - 50 Hz:
-            gamma1 = sosfiltfilt(sos_gamma1, lfp_matrix[probe][ch, :, :, ])
-            lfp_bandpass[probe][ch, :, 2, :] = gamma1
-            lfp_hilbert[probe][ch, :, 2, :] = np.abs(hilbert(gamma1))
-
-            # higher gamma 50 - 80
-            gamma2 = sosfiltfilt(sos_gamma2, lfp_matrix[probe][ch, :, :, ])
-            lfp_bandpass[probe][ch, :, 3, :] = gamma2
-            lfp_hilbert[probe][ch, :, 3, :] = np.abs(hilbert(gamma2))
-
-        lfp_bandpass[probe][:, :, 0, :] = lfp_bandpass[probe][:, :, 0, :] / np.max(lfp_bandpass[probe][:, :, 0, :])
-        lfp_bandpass[probe][:, :, 1, :] = lfp_bandpass[probe][:, :, 1, :] / np.max(lfp_bandpass[probe][:, :, 1, :])
-        lfp_bandpass[probe][:, :, 2, :] = lfp_bandpass[probe][:, :, 2, :] / np.max(lfp_bandpass[probe][:, :, 2, :])
-        lfp_bandpass[probe][:, :, 3, :] = lfp_bandpass[probe][:, :, 3, :] / np.max(lfp_bandpass[probe][:, :, 3, :])
-
-    return lfp_hilbert, lfp_bandpass
+    return lfp_hilbert
 
 
 def get_csd(session_id, stim='flashes', plot=True):
@@ -158,7 +123,7 @@ def get_csd(session_id, stim='flashes', plot=True):
 
 
 def get_cortical_layer(probe_id):
-    df = pd.read_csv('unit_table.csv')
+    df = pd.read_csv('data/unit_table.csv')
     pos_ = df[df.ecephys_probe_id.values == probe_id].probe_vertical_position.values
     layer_ = df[df.ecephys_probe_id.values == probe_id].cortical_layer.values
     ind = np.where((layer_ <= 6) & (layer_ > 0))
@@ -176,11 +141,9 @@ def get_cortical_layer(probe_id):
     return map_final
 
 
-def get_layers2(session_id, probe, lfp_channel_ids):
+def get_layers(session, probe, lfp_channel_ids):
     map_channel_pos = pd.DataFrame()
     map_channel_pos['channel_id'] = lfp_channel_ids
-    session_directory = os.path.join(data_dir + '/session_' + str(session_id))
-    session = EcephysSession.from_nwb_path(os.path.join(session_directory, 'session_' + str(session_id) + '.nwb'))
     probe_id = session.units[session.units.probe_description == probe].probe_id.iloc[0]
     map_pos_layer = get_cortical_layer(probe_id)
     map_channel_pos['vertical_position'] = np.array([session.channels.loc[ch].probe_vertical_position
