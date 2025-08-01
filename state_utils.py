@@ -4,7 +4,7 @@ import ssm
 from ssm.util import find_permutation
 from einops import rearrange
 from itertools import groupby, permutations, combinations_with_replacement
-
+from sklearn.preprocessing import StandardScaler
 
 class HMM:
     def __init__(self, num_trials = None, trial_length = None, num_states=3, num_iters=100):
@@ -12,48 +12,50 @@ class HMM:
         self.num_trials = num_trials
         self.trial_length = trial_length
         self.num_iters = num_iters
-        self.num_samples = num_trials * trial_length
+        self.num_samples = None
         self.obs_dim = None
         self.log_likelihoods = []
         self.states = []
         self.hmm = None
         self.state_definition = []
         self.top_eig = None
+    
 
     def set_data_params(self, input_lfp):
         if not self.num_trials:
-            self.num_trials = input_lfp.shape[1]
+            self.num_trials = input_lfp.shape[2]
         if not self.trial_length:
             self.trial_length = input_lfp.shape[3]
         if not self.num_samples:
             self.num_samples = self.num_trials * self.trial_length
         if not self.obs_dim:
-            self.obs_dim = input_lfp.shape[0]*input_lfp.shape[2]
+            self.obs_dim = input_lfp.shape[0]*input_lfp.shape[1]
 
     def rearrange_input(self, input_lfp):
-        return rearrange(input_lfp, 'c t b m -> (t m) (c b)')
+        return rearrange(input_lfp, 'c t b m -> (b m) (c t)')
 
     def reassign_states(self, states, input_lfp):
         states = states.reshape(self.num_trials, self.trial_length)
         theta_to_gamma_ratio = np.zeros(self.num_states)
         theta, gamma = 0, 3
         for c in range(self.num_states):
-            theta_mat, gamma_mat = input_lfp[:, :, theta, :], input_lfp[:, :, gamma, :]
+            theta_mat, gamma_mat = input_lfp[:, theta, :, :], input_lfp[:, gamma, :, :]
             theta_to_gamma_ratio[c] = np.nanmean(theta_mat[:, states[:] == c]) / np.nanmean(gamma_mat[:, states[:] == c])
         cluster_pos = np.argsort(theta_to_gamma_ratio)
+        states = states.reshape(-1)
         reassigned_states = np.zeros(states.reshape(-1).shape)
         for n, pos in enumerate(cluster_pos):
             reassigned_states[states == pos] = n
         return reassigned_states
 
     def set_state_definition(self, input_lfp):
-        state_def = np.zeros([input_lfp.shape[2], self.num_states])
-        for band in range(input_lfp.shape[2]):
-            mat = (input_lfp[:, :, band, :] - np.nanmean(input_lfp[:, :, band, :])) / np.nanstd(
-                input_lfp[:, :, band, :])
+        state_def = np.zeros([input_lfp.shape[1], self.num_states])
+        for band in range(input_lfp.shape[1]):
+            mat = (input_lfp[:, band, :, :] - np.nanmean(input_lfp[:, band, :, :])) / np.nanstd(
+                input_lfp[:, band, :, :])
             for num_state in range(self.num_states):
-                state_def[band, num_state, 0] = np.nanmean(mat[:, self.states[:] == num_state])
-        for band in range(input_lfp.shape[2]):
+                state_def[band, num_state] = np.nanmean(mat[:, self.states[:] == num_state])
+        for band in range(input_lfp.shape[1]):
             state_def[band] = (state_def[band] - np.nanmean(state_def[band])) / np.nanstd(state_def[band])
         self.state_definition = state_def
         self.top_eig = np.linalg.eig(np.cov(np.transpose(self.state_definition)))
@@ -66,6 +68,8 @@ class HMM:
     def fit(self, input_lfp):
         self.set_data_params(input_lfp)
         input_lfp_2D = self.rearrange_input(input_lfp)
+        input_lfp_2D = StandardScaler().fit_transform(input_lfp_2D.T).T
+        print(f'Input 2D-LFP shape: {input_lfp_2D.shape}')
         np.random.seed(seed=42)
         hmm = ssm.HMM(self.num_states, self.obs_dim, observations="gaussian")
         hmm_lls = hmm.fit(input_lfp_2D, method="em", num_em_iters=self.num_iters)
