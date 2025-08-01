@@ -196,7 +196,9 @@ def bin_data(data, Fs_original, Fs):
     if len(dims) == 3:
         binned = [np.nanmean(data[:,:,  0 + t * bin_w: bin_w + t * bin_w], axis=-1) for t in range(Tm)]
         return rearrange(np.array(binned), 'l b w -> b w l')
-
+    if len(dims) == 4:
+        binned = [np.nanmean(data[:, :, :, 0 + t * bin_w: bin_w + t * bin_w], axis=-1) for t in range(Tm)]
+        return rearrange(np.array(binned), 'l b w c -> b c w l')
 
 def consecutive(s):
     maxrun = -1
