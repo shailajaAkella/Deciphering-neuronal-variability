@@ -300,20 +300,20 @@ def consensus_clustering(df_summary, n_boot=200, meanshift_bandwidth=2,
             plt.savefig(save_plot_location + "/dendrogram.png", dpi=300)
 
     # evaluate silhouette score to select n_clusters.
-    score = np.zeros(13)
+    score = np.zeros(len(cluster_range))
     for n, nc in enumerate(cluster_range):
         labels = sch.fcluster(Lin, nc, criterion='maxclust')
         score[n] = silhouette_score(prob_matrix, labels)
 
-    kneedle = KneeLocator(np.arange(2, 15), score, S=3, curve="concave", direction="increasing",
+    kneedle = KneeLocator(cluster_range, score, S=3, curve="concave", direction="increasing",
                           interp_method="polynomial")
     kneedle.plot_knee_normalized()
 
     kneedle.plot_knee(figsize=(3, 3), ylabel='silhouette score', xlabel='number of clusters')
     NC = kneedle.knee
 
-    if NC == 0:
-        NC = 14
+    if NC == 0 or NC is None:
+        NC = cluster_range[-1]
 
     if save_plot_location:
         plt.savefig(save_plot_location + 'silhouette_scores.png', dpi=300)
